@@ -1,7 +1,16 @@
 
 import streamlit as st
 import yfinance as yf
-from financial_ratios import calculate_profit_margin
+
+from financial_ratios import (
+    calculate_profit_margin,
+    calculate_roa,
+    calculate_roe,
+    calculate_current_ratio,
+    calculate_debt_to_equity,
+    calculate_asset_turnover
+)
+
 
 # Page settings
 st.set_page_config(
