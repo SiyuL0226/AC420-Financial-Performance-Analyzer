@@ -6,7 +6,7 @@ import pandas as pd
 # 1. PROFITABILITY RATIOS
 # ==========================================
 
-def calculate_profit_margin(income_statement):
+def calculate_profit_margin:
     """
     Formula:
     Profit Margin = Net Income / Total Revenue
