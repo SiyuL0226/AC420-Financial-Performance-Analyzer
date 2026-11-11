@@ -84,25 +84,62 @@ if st.button("Analyze Company"):
                             use_container_width=True
                         )
                         
-                    # Financial Ratio Analysis
+                   
+                    # =================================
+                    # FINANCIAL RATIO ANALYSIS
+                    # =================================
+
                     st.subheader("Financial Ratios")
 
-                    profit_margin = calculate_profit_margin(
-                        income_statement
-                    )
-
-                    if profit_margin is not None:
-                        st.metric(
+                    ratios = [
+                        (
+                            "ROA",
+                            calculate_roa(income_statement, balance_sheet),
+                            True
+                        ),
+                        (
+                            "ROE",
+                            calculate_roe(income_statement, balance_sheet),
+                            True
+                        ),
+                        (
                             "Profit Margin",
-                            f"{profit_margin:.2%}"
+                            calculate_profit_margin(income_statement),
+                            True
+                        ),
+                        (
+                            "Current Ratio",
+                            calculate_current_ratio(balance_sheet),
+                            False
+                        ),
+                        (
+                            "Debt-to-Equity",
+                            calculate_debt_to_equity(balance_sheet),
+                            False
+                        ),
+                        (
+                            "Asset Turnover",
+                            calculate_asset_turnover(income_statement, balance_sheet),
+                            False
                         )
-                    else:
-                        st.warning(
-                            "Profit Margin data is unavailable."
-                        )
+                    ]
 
+                    cols = st.columns(3)
 
-            except Exception as e:
-                st.error(
-                    f"Unable to retrieve financial data: {e}"
-                )
+                    for i, (name, value, is_percent) in enumerate(ratios):
+                        with cols[i % 3]:
+
+                            if value is None:
+                                display_value = "N/A"
+
+                            elif is_percent:
+                                display_value = f"{value:.2%}"
+
+                            else:
+                                display_value = f"{value:.2f}x"
+
+                            st.metric(
+                                label=name,
+                                value=display_value
+                            )
+
