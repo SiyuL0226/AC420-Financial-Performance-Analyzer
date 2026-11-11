@@ -74,6 +74,24 @@ if st.button("Analyze Company"):
                             balance_sheet,
                             use_container_width=True
                         )
+                        
+                    # Financial Ratio Analysis
+                    st.subheader("Financial Ratios")
+
+                    profit_margin = calculate_profit_margin(
+                        income_statement
+                    )
+
+                    if profit_margin is not None:
+                        st.metric(
+                            "Profit Margin",
+                            f"{profit_margin:.2%}"
+                        )
+                    else:
+                        st.warning(
+                            "Profit Margin data is unavailable."
+                        )
+
 
             except Exception as e:
                 st.error(
