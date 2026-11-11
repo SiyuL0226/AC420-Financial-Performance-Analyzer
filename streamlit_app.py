@@ -11,8 +11,10 @@ from financial_ratios import (
     calculate_asset_turnover
 )
 
+# ==========================================
+# PAGE SETTINGS
+# ==========================================
 
-# Page settings
 st.set_page_config(
     page_title="Financial Performance Analyzer",
     layout="wide"
@@ -25,13 +27,19 @@ st.write(
     "Analyze the financial performance of public companies."
 )
 
-# User enters stock ticker
+# ==========================================
+# USER INPUT
+# ==========================================
+
 ticker = st.text_input(
     "Enter a stock ticker:",
     value="MSFT"
 ).strip().upper()
 
-# Analyze button
+# ==========================================
+# ANALYZE COMPANY
+# ==========================================
+
 if st.button("Analyze Company"):
 
     if not ticker:
@@ -64,7 +72,10 @@ if st.button("Analyze Company"):
                         f"Financial data loaded for {ticker}"
                     )
 
-                    # Display the financial statements
+                    # ==================================
+                    # FINANCIAL STATEMENTS
+                    # ==================================
+
                     tab1, tab2 = st.tabs([
                         "Income Statement",
                         "Balance Sheet"
@@ -83,50 +94,66 @@ if st.button("Analyze Company"):
                             balance_sheet,
                             use_container_width=True
                         )
-                        
-                   
-                    # =================================
+
+                    # ==================================
                     # FINANCIAL RATIO ANALYSIS
-                    # =================================
+                    # ==================================
 
                     st.subheader("Financial Ratios")
 
                     ratios = [
                         (
                             "ROA",
-                            calculate_roa(income_statement, balance_sheet),
+                            calculate_roa(
+                                income_statement,
+                                balance_sheet
+                            ),
                             True
                         ),
                         (
                             "ROE",
-                            calculate_roe(income_statement, balance_sheet),
+                            calculate_roe(
+                                income_statement,
+                                balance_sheet
+                            ),
                             True
                         ),
                         (
                             "Profit Margin",
-                            calculate_profit_margin(income_statement),
+                            calculate_profit_margin(
+                                income_statement
+                            ),
                             True
                         ),
                         (
                             "Current Ratio",
-                            calculate_current_ratio(balance_sheet),
+                            calculate_current_ratio(
+                                balance_sheet
+                            ),
                             False
                         ),
                         (
                             "Debt-to-Equity",
-                            calculate_debt_to_equity(balance_sheet),
+                            calculate_debt_to_equity(
+                                balance_sheet
+                            ),
                             False
                         ),
                         (
                             "Asset Turnover",
-                            calculate_asset_turnover(income_statement, balance_sheet),
+                            calculate_asset_turnover(
+                                income_statement,
+                                balance_sheet
+                            ),
                             False
                         )
                     ]
 
+                    # Display financial ratios in 3 columns
                     cols = st.columns(3)
 
                     for i, (name, value, is_percent) in enumerate(ratios):
+
                         with cols[i % 3]:
 
                             if value is None:
@@ -142,4 +169,14 @@ if st.button("Analyze Company"):
                                 label=name,
                                 value=display_value
                             )
+
+            # ==========================================
+            # ERROR HANDLING
+            # ==========================================
+
+            except Exception as e:
+                st.error(
+                    f"Unable to retrieve or process financial data: {e}"
+                )
+
 
