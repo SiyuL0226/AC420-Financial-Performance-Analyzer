@@ -1,1 +1,51 @@
 
+import pandas as pd
+
+
+# ==========================================
+# 1. PROFITABILITY RATIOS
+# ==========================================
+
+def calculate_profit_margin(income_statement):
+    """
+    Formula:
+    Profit Margin = Net Income / Total Revenue
+
+    Uses the latest available fiscal year.
+    """
+
+    if income_statement.empty:
+        return None
+
+    # Check if required data exists
+    if (
+        "NetIncome" not in income_statement.index
+        or "TotalRevenue" not in income_statement.index
+    ):
+        return None
+
+    # Get the latest fiscal year
+    latest_year = income_statement.columns.max()
+
+    # Retrieve financial data
+    net_income = income_statement.loc[
+        "NetIncome", latest_year
+    ]
+
+    total_revenue = income_statement.loc[
+        "TotalRevenue", latest_year
+    ]
+
+    # Handle missing data and division by zero
+    if (
+        pd.isna(net_income)
+        or pd.isna(total_revenue)
+        or total_revenue == 0
+    ):
+        return None
+
+    # Calculate profit margin
+    profit_margin = net_income / total_revenue
+
+    return profit_margin
+
