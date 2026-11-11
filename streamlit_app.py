@@ -1,6 +1,7 @@
 
 import streamlit as st
 import yfinance as yf
+from financial_ratios import calculate_profit_margin
 
 # Page settings
 st.set_page_config(
