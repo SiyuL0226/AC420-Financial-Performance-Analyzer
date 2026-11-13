@@ -1,10 +1,3 @@
-"""Three-factor DuPont analysis for the AC420 Streamlit dashboard.
-
-DuPont ROE = Profit Margin x Asset Turnover x Equity Multiplier.
-
-For consistency with the project's existing financial_ratios.py, both asset
-turnover and the equity multiplier use average beginning/ending balances.
-"""
 
 from financial_ratios import (
     _average_balance,
@@ -15,30 +8,40 @@ from financial_ratios import (
 )
 
 
-def calculate_dupont(income_statement, balance_sheet, year=None):
-    """Calculate DuPont factors for one fiscal year.
+def calculate_dupont(
+    income_statement,
+    balance_sheet,
+    year=None
+):
 
-    ``year`` may be a statement column (such as a pandas Timestamp) or a
-    four-digit fiscal year. Omitting it uses the latest income-statement year.
+    fiscal_year_end = _resolve_year(
+        income_statement, year
+    )
 
-    Returns a dictionary of numeric ratios (percentages as decimals), or
-    ``None`` if a required statement value or beginning balance is missing.
-    """
-    fiscal_year_end = _resolve_year(income_statement, year)
     if fiscal_year_end is None:
         return None
 
     profit_margin = calculate_profit_margin(
-        income_statement, year=fiscal_year_end
+        income_statement,
+        year=fiscal_year_end
     )
+
     asset_turnover = calculate_asset_turnover(
-        income_statement, balance_sheet, year=fiscal_year_end
+        income_statement,
+        balance_sheet,
+        year=fiscal_year_end
     )
+
     average_assets = _average_balance(
-        balance_sheet, "TotalAssets", fiscal_year_end
+        balance_sheet,
+        "TotalAssets",
+        fiscal_year_end
     )
+
     average_equity = _average_balance(
-        balance_sheet, "StockholdersEquity", fiscal_year_end
+        balance_sheet,
+        "StockholdersEquity",
+        fiscal_year_end
     )
 
     if (
@@ -51,8 +54,15 @@ def calculate_dupont(income_statement, balance_sheet, year=None):
     ):
         return None
 
-    equity_multiplier = average_assets / average_equity
-    dupont_roe = profit_margin * asset_turnover * equity_multiplier
+    equity_multiplier = (
+        average_assets / average_equity
+    )
+
+    dupont_roe = (
+        profit_margin
+        * asset_turnover
+        * equity_multiplier
+    )
 
     return {
         "fiscal_year_end": fiscal_year_end,
@@ -60,7 +70,11 @@ def calculate_dupont(income_statement, balance_sheet, year=None):
         "asset_turnover": asset_turnover,
         "equity_multiplier": equity_multiplier,
         "dupont_roe": dupont_roe,
+
         "calculated_roe": calculate_roe(
-            income_statement, balance_sheet, year=fiscal_year_end
+            income_statement,
+            balance_sheet,
+            year=fiscal_year_end
         ),
     }
+
