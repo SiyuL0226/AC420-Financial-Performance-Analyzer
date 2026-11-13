@@ -1,3 +1,4 @@
+import math
 
 import streamlit as st
 import yfinance as yf
@@ -8,175 +9,88 @@ from financial_ratios import (
     calculate_roe,
     calculate_current_ratio,
     calculate_debt_to_equity,
-    calculate_asset_turnover
+    calculate_asset_turnover,
 )
 
-# ==========================================
-# PAGE SETTINGS
-# ==========================================
-
+# ==================================================
+# 1. PAGE SETTINGS AND VISUAL STYLE
+# ==================================================
 st.set_page_config(
-    page_title="Financial Performance Analyzer",
-    layout="wide"
+    page_title="Finance Analyzer",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-# App title
-st.title("Financial Performance Analyzer")
-
-st.write(
-    "Analyze the financial performance of public companies."
+st.markdown(
+    """
+    <style>
+        .stApp { background-color: #FCFCFC; }
+        section[data-testid="stSidebar"] {
+            background-color: #F8F9F9;
+            border-right: 1px solid #E5E7EB;
+        }
+        div.stButton > button[kind="primary"] {
+            background-color: #23827C;
+            border-color: #23827C;
+            color: white;
+            border-radius: 9px;
+        }
+        div.stButton > button[kind="primary"]:hover {
+            background-color: #176E69;
+            border-color: #176E69;
+            color: white;
+        }
+        div[data-testid="stMetric"] { padding: 6px 4px; }
+        div[data-testid="stMetricValue"] { font-weight: 650; }
+        div[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 14px; }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
-# ==========================================
-# USER INPUT
-# ==========================================
+# SIC grouping explicitly assigned for this project.
+# Add other tickers here only after you verify their industry classification.
+ASSIGNED_SIC = {
+    "MSFT": "7372 — Services: Prepackaged Software",
+}
 
-ticker = st.text_input(
-    "Enter a stock ticker:",
-    value="MSFT"
-).strip().upper()
 
-# ==========================================
-# ANALYZE COMPANY
-# ==========================================
+def format_ratio(value, is_percent=False):
+    """Use the same percent/multiple display rules as the original app."""
+    try:
+        number = float(value)
+        if not math.isfinite(number):
+            return "N/A"
+        return f"{number:.2%}" if is_percent else f"{number:.2f}x"
+    except (TypeError, ValueError):
+        return "N/A"
 
-if st.button("Analyze Company"):
 
-    if not ticker:
-        st.warning("Please enter a stock ticker.")
+def metric_card(label, value, is_percent=False):
+    with st.container(border=True):
+        st.metric(label, format_ratio(value, is_percent))
 
+
+def load_company(ticker):
+    """Load one company and calculate the six existing ratios."""
+    company = yf.Ticker(ticker)
+    income_statement = company.get_income_stmt(freq="yearly")
+    balance_sheet = company.get_balance_sheet(freq="yearly")
+
+    if income_statement.empty or balance_sheet.empty:
+        raise ValueError("Financial data is unavailable for this ticker.")
+
+    # Company details are helpful for the UI but are not required to calculate ratios.
+    try:
+        info = company.get_info() or {}
+    except Exception:
+        info = {}
+
+    fiscal_year_end = income_statement.columns[0]
+    if hasattr(fiscal_year_end, "strftime"):
+        fiscal_year_end = fiscal_year_end.strftime("%B %Y")
     else:
-        with st.spinner("Loading financial data..."):
+        fiscal_year_end = str(fiscal_year_end)
 
-            try:
-                # Connect to Yahoo Finance
-                company = yf.Ticker(ticker)
-
-                # Get annual financial statements
-                income_statement = company.get_income_stmt(
-                    freq="yearly"
-                )
-
-                balance_sheet = company.get_balance_sheet(
-                    freq="yearly"
-                )
-
-                # Check if data exists
-                if income_statement.empty or balance_sheet.empty:
-                    st.error(
-                        "Financial data is unavailable for this ticker."
-                    )
-
-                else:
-                    st.success(
-                        f"Financial data loaded for {ticker}"
-                    )
-
-                    # ==================================
-                    # FINANCIAL STATEMENTS
-                    # ==================================
-
-                    tab1, tab2 = st.tabs([
-                        "Income Statement",
-                        "Balance Sheet"
-                    ])
-
-                    with tab1:
-                        st.subheader("Income Statement")
-                        st.dataframe(
-                            income_statement,
-                            use_container_width=True
-                        )
-
-                    with tab2:
-                        st.subheader("Balance Sheet")
-                        st.dataframe(
-                            balance_sheet,
-                            use_container_width=True
-                        )
-
-                    # ==================================
-                    # FINANCIAL RATIO ANALYSIS
-                    # ==================================
-
-                    st.subheader("Financial Ratios")
-
-                    ratios = [
-                        (
-                            "ROA",
-                            calculate_roa(
-                                income_statement,
-                                balance_sheet
-                            ),
-                            True
-                        ),
-                        (
-                            "ROE",
-                            calculate_roe(
-                                income_statement,
-                                balance_sheet
-                            ),
-                            True
-                        ),
-                        (
-                            "Profit Margin",
-                            calculate_profit_margin(
-                                income_statement
-                            ),
-                            True
-                        ),
-                        (
-                            "Current Ratio",
-                            calculate_current_ratio(
-                                balance_sheet
-                            ),
-                            False
-                        ),
-                        (
-                            "Debt-to-Equity",
-                            calculate_debt_to_equity(
-                                balance_sheet
-                            ),
-                            False
-                        ),
-                        (
-                            "Asset Turnover",
-                            calculate_asset_turnover(
-                                income_statement,
-                                balance_sheet
-                            ),
-                            False
-                        )
-                    ]
-
-                    # Display financial ratios in 3 columns
-                    cols = st.columns(3)
-
-                    for i, (name, value, is_percent) in enumerate(ratios):
-
-                        with cols[i % 3]:
-
-                            if value is None:
-                                display_value = "N/A"
-
-                            elif is_percent:
-                                display_value = f"{value:.2%}"
-
-                            else:
-                                display_value = f"{value:.2f}x"
-
-                            st.metric(
-                                label=name,
-                                value=display_value
-                            )
-
-            # ==========================================
-            # ERROR HANDLING
-            # ==========================================
-
-            except Exception as e:
-                st.error(
-                    f"Unable to retrieve or process financial data: {e}"
-                )
-
-
+    ratios = {
+        "ROA": (calculate_roa(income_statement, balance_sheet), True),
