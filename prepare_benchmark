@@ -1,0 +1,189 @@
+from pathlib import Path
+import pandas as pd
+import numpy as np
+
+# Change this to the actual local CSV path
+INPUT = Path("WRDS compustat data(1).csv")
+OUTPUT = Path("output")
+OUTPUT.mkdir(exist_ok=True)
+
+df = pd.read_csv(INPUT, low_memory=False)
+df.columns = df.columns.str.lower().str.strip()
+
+# 1. Standardize data
+for col in [
+    "sic", "fyear", "at", "ni", "revt",
+    "seq", "act", "lct", "dltt", "dlc",
+    "ebit", "xint"
+]:
+    df[col] = pd.to_numeric(df[col], errors="coerce")
+
+df["datadate"] = pd.to_datetime(
+    df["datadate"], errors="coerce"
+)
+
+df = df[
+    (df["indfmt"] == "INDL") &
+    (df["datafmt"] == "STD") &
+    (df["consol"] == "C") &
+    df["sic"].notna() &
+    df["fyear"].between(2014, 2025)
+].copy()
+
+# Exclude financial industries
+df = df[~df["sic"].between(6000, 6999)]
+
+# 2-digit SIC industry
+df["sic2"] = (df["sic"] // 100).astype(int)
+
+# One observation per company per fiscal year
+df = df.sort_values(["gvkey", "fyear", "datadate"])
+df = df.drop_duplicates(
+    ["gvkey", "fyear"], keep="last"
+)
+
+# 2. Calculate ratios
+g = df.groupby("gvkey")
+prev_year = g["fyear"].shift(1)
+consecutive = df["fyear"].sub(prev_year).eq(1)
+
+df["avg_assets"] = (
+    (df["at"] + g["at"].shift(1)) / 2
+).where(consecutive)
+
+df["avg_equity"] = (
+    (df["seq"] + g["seq"].shift(1)) / 2
+).where(consecutive)
+
+# Only positive denominator values
+def safe_divide(numerator, denominator):
+    return numerator.div(
+        denominator.where(denominator > 0)
+    )
+
+df["roa"] = safe_divide(df["ni"], df["avg_assets"])
+df["roe"] = safe_divide(df["ni"], df["avg_equity"])
+df["profit_margin"] = safe_divide(df["ni"], df["revt"])
+df["current_ratio"] = safe_divide(df["act"], df["lct"])
+
+# Do not assume missing debt is zero
+df["total_debt"] = df["dltt"] + df["dlc"]
+df["debt_to_equity"] = safe_divide(
+    df["total_debt"], df["seq"]
+)
+
+df["asset_turnover"] = safe_divide(
+    df["revt"], df["avg_assets"]
+)
+
+df["interest_coverage"] = safe_divide(
+    df["ebit"], df["xint"].abs()
+)
+
+ratios = [
+    "roa", "roe", "profit_margin",
+    "current_ratio", "debt_to_equity",
+    "asset_turnover", "interest_coverage"
+]
+
+df[ratios] = df[ratios].replace(
+    [np.inf, -np.inf], np.nan
+)
+
+# 3. Evaluate industry coverage
+data = df[df["fyear"].between(2015, 2025)].copy()
+
+coverage = (
+    data[data["fyear"] == 2025]
+    .groupby("sic2")
+    .agg(
+        n_firms=("gvkey", "nunique"),
+        valid_roa=("roa", "count"),
+        valid_roe=("roe", "count"),
+        valid_margin=("profit_margin", "count")
+    )
+    .reset_index()
+)
+
+coverage["roa_coverage"] = (
+    coverage["valid_roa"] / coverage["n_firms"]
+)
+
+coverage = coverage.sort_values(
+    "valid_roa", ascending=False
+)
+
+coverage.to_csv(
+    OUTPUT / "industry_coverage.csv",
+    index=False
+)
+
+# 4. Select eligible industries
+eligible = coverage[
+    (coverage["valid_roa"] >= 30) &
+    (coverage["roa_coverage"] >= 0.70)
+].copy()
+
+# Provisional top 20, review manually later
+selected = eligible.head(20)["sic2"].tolist()
+
+print("Candidate SIC2 industries:", selected)
+print(eligible.head(30).to_string(index=False))
+
+# 5. Industry-year benchmarks
+selected_data = data[
+    data["sic2"].isin(selected)
+]
+
+benchmarks = (
+    selected_data
+    .groupby(["sic2", "fyear"])[ratios]
+    .agg(["median", "count"])
+)
+
+benchmarks.columns = [
+    f"{ratio}_{stat}"
+    for ratio, stat in benchmarks.columns
+]
+
+benchmarks = benchmarks.reset_index()
+
+# Do not report medians with fewer than 20 observations
+for ratio in ratios:
+    benchmarks.loc[
+        benchmarks[f"{ratio}_count"] < 20,
+        f"{ratio}_median"
+    ] = np.nan
+
+benchmarks.to_csv(
+    OUTPUT / "industry_benchmarks.csv",
+    index=False
+)
+
+# 6. Latest company-to-industry mapping
+mapping = (
+    df.sort_values(["gvkey", "fyear", "datadate"])
+    .drop_duplicates("gvkey", keep="last")
+    [["gvkey", "tic", "conm", "sic", "sic2"]]
+    .dropna(subset=["tic"])
+    .copy()
+)
+
+mapping["tic"] = mapping["tic"].str.upper().str.strip()
+
+# Flag ambiguous tickers instead of guessing
+mapping["ticker_matches"] = (
+    mapping.groupby("tic")["gvkey"].transform("nunique")
+)
+
+mapping = mapping[
+    (mapping["ticker_matches"] == 1) &
+    mapping["sic2"].isin(selected)
+].drop(columns="ticker_matches")
+
+mapping.to_csv(
+    OUTPUT / "ticker_industry_mapping.csv",
+    index=False
+)
+
+print("Files created in:", OUTPUT)
