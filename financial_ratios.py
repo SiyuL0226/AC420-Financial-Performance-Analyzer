@@ -1,126 +1,257 @@
 
 import pandas as pd
 
-from financial_ratios import (
-    calculate_profit_margin,
-    calculate_roa,
-    calculate_roe,
-    calculate_current_ratio,
-    calculate_debt_to_equity,
-    calculate_asset_turnover,
-)
 
-PERCENT_RATIOS = ["ROA", "ROE", "Profit Margin"]
+# ==========================================
+# HELPER FUNCTIONS
+# ==========================================
 
-MULTIPLE_RATIOS = [
-    "Current Ratio",
-    "Debt-to-Equity",
-    "Asset Turnover"
-]
+def _latest_year(statement):
+    """Find the latest available fiscal year."""
 
-ALL_RATIOS = PERCENT_RATIOS + MULTIPLE_RATIOS
+    if statement is None or statement.empty:
+        return None
+
+    return statement.columns.max()
 
 
-def calculate_historical_ratios(
-    income_statement,
-    balance_sheet
-):
-    columns = ["Fiscal Year"] + ALL_RATIOS
+def _resolve_year(statement, year=None):
+    """Find the requested fiscal year."""
+
+    if statement is None or statement.empty:
+        return None
+
+    if year is None:
+        return _latest_year(statement)
+
+    if year in statement.columns:
+        return year
+
+    if str(year).isdigit() and len(str(year)) == 4:
+        matches = [
+            col for col in statement.columns
+            if pd.Timestamp(col).year == int(year)
+        ]
+
+        return max(matches) if matches else None
+
+    return None
+
+
+def _get_value(statement, row_name, year):
+    """Retrieve an accounting value safely."""
 
     if (
-        income_statement is None
+        statement is None
+        or statement.empty
+        or year is None
+        or row_name not in statement.index
+        or year not in statement.columns
+    ):
+        return None
+
+    value = statement.loc[row_name, year]
+
+    if pd.isna(value):
+        return None
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _average_balance(balance_sheet, row_name, current_year):
+    """Calculate average beginning and ending balance."""
+
+    if (
+        current_year is None
         or balance_sheet is None
-        or income_statement.empty
         or balance_sheet.empty
     ):
-        return pd.DataFrame(columns=columns)
+        return None
 
-    rows = []
+    prior_years = [
+        year for year in balance_sheet.columns
+        if year < current_year
+    ]
 
-    for year_end in sorted(income_statement.columns):
+    if not prior_years:
+        return None
 
-        try:
-            fiscal_year = pd.Timestamp(year_end).year
-        except (TypeError, ValueError):
-            continue
+    previous_year = max(prior_years)
 
-        rows.append({
-            "Fiscal Year": fiscal_year,
+    if (
+        pd.Timestamp(current_year).year
+        - pd.Timestamp(previous_year).year != 1
+    ):
+        return None
 
-            "ROA": calculate_roa(
-                income_statement, balance_sheet, year=year_end
-            ),
-
-            "ROE": calculate_roe(
-                income_statement, balance_sheet, year=year_end
-            ),
-
-            "Profit Margin": calculate_profit_margin(
-                income_statement, year=year_end
-            ),
-
-            "Current Ratio": calculate_current_ratio(
-                balance_sheet, year=year_end
-            ),
-
-            "Debt-to-Equity": calculate_debt_to_equity(
-                balance_sheet, year=year_end
-            ),
-
-            "Asset Turnover": calculate_asset_turnover(
-                income_statement, balance_sheet, year=year_end
-            ),
-        })
-
-    if not rows:
-        return pd.DataFrame(columns=columns)
-
-    result = pd.DataFrame(rows, columns=columns)
-
-    return result.sort_values(
-        "Fiscal Year"
-    ).reset_index(drop=True)
-
-
-def calculate_yoy_changes(historical_ratios):
-
-    columns = (
-        ["Fiscal Year"]
-        + [f"{name} (pp)" for name in PERCENT_RATIOS]
-        + [f"{name} (x)" for name in MULTIPLE_RATIOS]
+    current = _get_value(
+        balance_sheet, row_name, current_year
     )
 
-    if historical_ratios is None or historical_ratios.empty:
-        return pd.DataFrame(columns=columns)
+    previous = _get_value(
+        balance_sheet, row_name, previous_year
+    )
 
-    history = historical_ratios.sort_values(
-        "Fiscal Year"
-    ).reset_index(drop=True)
+    if current is None or previous is None:
+        return None
 
-    changes = pd.DataFrame({
-        "Fiscal Year": history["Fiscal Year"]
-    })
+    return (current + previous) / 2
 
-    is_consecutive = history[
-        "Fiscal Year"
-    ].diff().eq(1)
 
-    for name in PERCENT_RATIOS:
-        values = pd.to_numeric(
-            history[name], errors="coerce"
-        )
+# ==========================================
+# 1. PROFIT MARGIN
+# ==========================================
 
-        changes[f"{name} (pp)"] = (
-            values.diff() * 100
-        ).where(is_consecutive)
+def calculate_profit_margin(income_statement, year=None):
 
-    for name in MULTIPLE_RATIOS:
-        values = pd.to_numeric(
-            history[name], errors="coerce"
-        )
+    year = _resolve_year(income_statement, year)
 
-        changes[f"{name} (x)"] = (
-            values.diff()
-        ).where(is_consecutive)
+    net_income = _get_value(
+        income_statement, "NetIncome", year
+    )
 
-    return changes[columns]
+    revenue = _get_value(
+        income_statement, "TotalRevenue", year
+    )
+
+    if net_income is None or revenue is None or revenue == 0:
+        return None
+
+    return net_income / revenue
+
+
+# ==========================================
+# 2. RETURN ON ASSETS
+# ==========================================
+
+def calculate_roa(income_statement, balance_sheet, year=None):
+
+    year = _resolve_year(income_statement, year)
+
+    net_income = _get_value(
+        income_statement, "NetIncome", year
+    )
+
+    average_assets = _average_balance(
+        balance_sheet, "TotalAssets", year
+    )
+
+    if (
+        net_income is None
+        or average_assets is None
+        or average_assets <= 0
+    ):
+        return None
+
+    return net_income / average_assets
+
+
+# ==========================================
+# 3. RETURN ON EQUITY
+# ==========================================
+
+def calculate_roe(income_statement, balance_sheet, year=None):
+
+    year = _resolve_year(income_statement, year)
+
+    net_income = _get_value(
+        income_statement, "NetIncome", year
+    )
+
+    average_equity = _average_balance(
+        balance_sheet, "StockholdersEquity", year
+    )
+
+    if (
+        net_income is None
+        or average_equity is None
+        or average_equity <= 0
+    ):
+        return None
+
+    return net_income / average_equity
+
+
+# ==========================================
+# 4. CURRENT RATIO
+# ==========================================
+
+def calculate_current_ratio(balance_sheet, year=None):
+
+    year = _resolve_year(balance_sheet, year)
+
+    current_assets = _get_value(
+        balance_sheet, "CurrentAssets", year
+    )
+
+    current_liabilities = _get_value(
+        balance_sheet, "CurrentLiabilities", year
+    )
+
+    if (
+        current_assets is None
+        or current_liabilities is None
+        or current_liabilities <= 0
+    ):
+        return None
+
+    return current_assets / current_liabilities
+
+
+# ==========================================
+# 5. DEBT-TO-EQUITY
+# ==========================================
+
+def calculate_debt_to_equity(balance_sheet, year=None):
+
+    year = _resolve_year(balance_sheet, year)
+
+    total_debt = _get_value(
+        balance_sheet, "TotalDebt", year
+    )
+
+    equity = _get_value(
+        balance_sheet, "StockholdersEquity", year
+    )
+
+    if (
+        total_debt is None
+        or equity is None
+        or equity <= 0
+    ):
+        return None
+
+    return total_debt / equity
+
+
+# ==========================================
+# 6. ASSET TURNOVER
+# ==========================================
+
+def calculate_asset_turnover(
+    income_statement,
+    balance_sheet,
+    year=None
+):
+
+    year = _resolve_year(income_statement, year)
+
+    revenue = _get_value(
+        income_statement, "TotalRevenue", year
+    )
+
+    average_assets = _average_balance(
+        balance_sheet, "TotalAssets", year
+    )
+
+    if (
+        revenue is None
+        or average_assets is None
+        or average_assets <= 0
+    ):
+        return None
+
+    return revenue / average_assets
