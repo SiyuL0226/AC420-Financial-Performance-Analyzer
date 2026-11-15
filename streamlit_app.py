@@ -20,12 +20,7 @@ from historical_analysis import (
 )
 
 from dupont_analysis import calculate_dupont
-from industry_benchmark import (
-    identify_industry,
-    get_industry_benchmark,
-    compare_with_industry,
-    load_benchmarks,
-)
+import industry_benchmark
 
 
 # ==========================================
