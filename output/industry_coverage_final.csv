@@ -1,0 +1,22 @@
+sic2,industry_name,n_firms,valid_roa,valid_roe,valid_margin,valid_current_ratio,valid_debt_to_equity,valid_asset_turnover,valid_interest_coverage,roa_coverage
+28,Chemicals and Allied Products,921,907,776,600,920,768,907,589,0.9847991313789359
+73,Business Services,764,756,652,741,748,660,756,596,0.9895287958115183
+36,Electronic and Other Electrical Equipment,325,322,296,313,325,293,322,250,0.9907692307692307
+38,"Measuring, Analyzing, and Controlling Instruments",305,303,281,280,304,278,303,229,0.9934426229508196
+49,"Electric, Gas, and Sanitary Services",252,251,246,247,252,245,251,247,0.996031746031746
+35,Industrial and Commercial Machinery and Computer Equipment,198,197,176,191,196,176,197,174,0.9949494949494949
+10,Metal Mining,196,187,167,118,196,172,187,156,0.9540816326530612
+37,Transportation Equipment,151,150,132,142,145,131,150,136,0.9933774834437086
+13,Oil and Gas Extraction,148,148,134,141,147,130,148,136,1.0
+20,Food and Kindred Products,118,116,108,116,118,104,116,106,0.9830508474576272
+48,Communications,105,104,89,101,105,88,104,93,0.9904761904761905
+59,Miscellaneous Retail,96,95,83,95,96,84,95,79,0.9895833333333334
+87,"Engineering, Accounting, Research, and Management Services",91,90,85,86,91,84,91,65,0.989010989010989
+80,Health Services,86,86,72,85,86,68,86,80,1.0
+50,Wholesale Trade - Durable Goods,82,82,80,80,82,78,82,66,1.0
+51,Wholesale Trade - Nondurable Goods,71,71,59,70,71,59,71,63,1.0
+44,Water Transportation,69,69,67,68,69,67,69,68,1.0
+79,Amusement and Recreation Services,62,61,46,60,61,43,61,55,0.9838709677419355
+34,Fabricated Metal Products,58,56,51,56,58,54,56,48,0.9655172413793104
+58,Eating and Drinking Places,56,56,46,56,56,46,56,50,1.0
+29,Petroleum Refining and Related Industries,27,27,24,24,27,24,27,26,1.0
