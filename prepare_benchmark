@@ -1,0 +1,480 @@
+
+# ============================================================
+# AC420 FINANCIAL PERFORMANCE ANALYZER
+# PREPARE INDUSTRY BENCHMARKS
+#
+# Data Source: WRDS Compustat North America
+# Fiscal Years: 2015-2025
+# Industry Classification: 2-digit SIC
+# Number of Industries: 21
+#
+# Outputs:
+# 1. industry_benchmarks_final.csv
+# 2. ticker_industry_mapping_final.csv
+# 3. industry_coverage_final.csv
+# ============================================================
+
+from pathlib import Path
+import pandas as pd
+import numpy as np
+
+
+# ============================================================
+# SECTION 1: FILE PATHS AND SETTINGS
+# Purpose: Define input and output file locations.
+# ============================================================
+
+INPUT = Path("WRDS compustat data.csv")
+OUTPUT = Path("output")
+
+OUTPUT.mkdir(parents=True, exist_ok=True)
+
+START_YEAR = 2015
+END_YEAR = 2025
+MIN_OBSERVATIONS = 20
+
+
+# ============================================================
+# SECTION 2: DEFINE FINAL 21 INDUSTRIES
+# Purpose: Use the selected SIC2 industry classifications.
+# ============================================================
+
+industry_names = {
+    10: "Metal Mining",
+    13: "Oil and Gas Extraction",
+    20: "Food and Kindred Products",
+    28: "Chemicals and Allied Products",
+    29: "Petroleum Refining and Related Industries",
+    34: "Fabricated Metal Products",
+    35: "Industrial and Commercial Machinery and Computer Equipment",
+    36: "Electronic and Other Electrical Equipment",
+    37: "Transportation Equipment",
+    38: "Measuring, Analyzing, and Controlling Instruments",
+    44: "Water Transportation",
+    48: "Communications",
+    49: "Electric, Gas, and Sanitary Services",
+    50: "Wholesale Trade - Durable Goods",
+    51: "Wholesale Trade - Nondurable Goods",
+    58: "Eating and Drinking Places",
+    59: "Miscellaneous Retail",
+    73: "Business Services",
+    79: "Amusement and Recreation Services",
+    80: "Health Services",
+    87: "Engineering, Accounting, Research, and Management Services"
+}
+
+selected_industries = list(industry_names.keys())
+
+assert len(selected_industries) == 21
+
+print("SECTION 2: INDUSTRY SELECTION")
+print("Selected industries:", selected_industries)
+
+
+# ============================================================
+# SECTION 3: LOAD WRDS COMPUSTAT DATA
+# Purpose: Import the original financial statement dataset.
+# ============================================================
+
+if not INPUT.exists():
+    raise FileNotFoundError(
+        f"Cannot find {INPUT}. "
+        "Place the WRDS CSV in the working directory."
+    )
+
+df = pd.read_csv(INPUT, low_memory=False)
+
+df.columns = df.columns.str.lower().str.strip()
+
+required_columns = [
+    "gvkey", "tic", "conm", "sic",
+    "fyear", "datadate",
+    "indfmt", "datafmt", "consol",
+    "at", "ni", "revt", "seq",
+    "act", "lct", "dltt", "dlc",
+    "ebit", "xint"
+]
+
+missing_columns = [
+    col for col in required_columns
+    if col not in df.columns
+]
+
+if missing_columns:
+    raise ValueError(
+        f"Missing required columns: {missing_columns}"
+    )
+
+print("\nSECTION 3: DATA LOADED")
+print("Original observations:", len(df))
+
+
+# ============================================================
+# SECTION 4: CLEAN AND STANDARDIZE DATA
+# Purpose:
+# - Convert financial variables to numeric.
+# - Keep standardized industrial financial statements.
+# - Exclude financial firms.
+# - Keep FY2014 for lagged calculations.
+# ============================================================
+
+numeric_columns = [
+    "sic", "fyear", "at", "ni", "revt",
+    "seq", "act", "lct", "dltt", "dlc",
+    "ebit", "xint"
+]
+
+for col in numeric_columns:
+    df[col] = pd.to_numeric(
+        df[col], errors="coerce"
+    )
+
+df["datadate"] = pd.to_datetime(
+    df["datadate"], errors="coerce"
+)
+
+for col in ["indfmt", "datafmt", "consol"]:
+    df[col] = (
+        df[col].astype("string").str.upper().str.strip()
+    )
+
+df = df[
+    (df["indfmt"] == "INDL") &
+    (df["datafmt"] == "STD") &
+    (df["consol"] == "C") &
+    df["sic"].notna() &
+    df["fyear"].between(2014, END_YEAR)
+].copy()
+
+# Exclude SIC 6000-6999 (financial industries)
+df = df[
+    ~df["sic"].between(6000, 6999)
+].copy()
+
+df["sic2"] = (
+    df["sic"] // 100
+).astype(int)
+
+# One record per firm per fiscal year
+df = df.sort_values(
+    ["gvkey", "fyear", "datadate"]
+)
+
+df = df.drop_duplicates(
+    ["gvkey", "fyear"],
+    keep="last"
+).copy()
+
+print("\nSECTION 4: CLEANING COMPLETED")
+print("Remaining observations:", len(df))
+print("Unique industries:", df["sic2"].nunique())
+
+
+# ============================================================
+# SECTION 5: CALCULATE FINANCIAL RATIOS
+# Purpose: Calculate ratios using Compustat variables.
+#
+# ROA = Net Income / Average Total Assets
+# ROE = Net Income / Average Equity
+# Profit Margin = Net Income / Revenue
+# Current Ratio = Current Assets / Current Liabilities
+# D/E = Total Interest-Bearing Debt / Equity
+# Asset Turnover = Revenue / Average Total Assets
+# Interest Coverage = EBIT / Interest Expense
+# ============================================================
+
+g = df.groupby("gvkey")
+
+previous_year = g["fyear"].shift(1)
+
+consecutive = (
+    df["fyear"] - previous_year
+).eq(1)
+
+df["avg_assets"] = (
+    (df["at"] + g["at"].shift(1)) / 2
+).where(consecutive)
+
+df["avg_equity"] = (
+    (df["seq"] + g["seq"].shift(1)) / 2
+).where(consecutive)
+
+
+def safe_divide(numerator, denominator):
+    return numerator.div(
+        denominator.where(denominator > 0)
+    )
+
+
+df["roa"] = safe_divide(
+    df["ni"], df["avg_assets"]
+)
+
+df["roe"] = safe_divide(
+    df["ni"], df["avg_equity"]
+)
+
+df["profit_margin"] = safe_divide(
+    df["ni"], df["revt"]
+)
+
+df["current_ratio"] = safe_divide(
+    df["act"], df["lct"]
+)
+
+# Do not replace missing debt with zero
+df["total_debt"] = (
+    df["dltt"] + df["dlc"]
+)
+
+df["debt_to_equity"] = safe_divide(
+    df["total_debt"], df["seq"]
+)
+
+df["asset_turnover"] = safe_divide(
+    df["revt"], df["avg_assets"]
+)
+
+df["interest_coverage"] = safe_divide(
+    df["ebit"], df["xint"].abs()
+)
+
+ratios = [
+    "roa",
+    "roe",
+    "profit_margin",
+    "current_ratio",
+    "debt_to_equity",
+    "asset_turnover",
+    "interest_coverage"
+]
+
+df[ratios] = df[ratios].replace(
+    [np.inf, -np.inf],
+    np.nan
+)
+
+print("\nSECTION 5: RATIOS CALCULATED")
+print("Ratios:", ratios)
+
+
+# ============================================================
+# SECTION 6: FILTER FINAL ANALYSIS DATA
+# Purpose: Keep the selected 21 industries, FY2015-2025.
+# ============================================================
+
+final_data = df[
+    df["sic2"].isin(selected_industries) &
+    df["fyear"].between(START_YEAR, END_YEAR)
+].copy()
+
+final_data["industry_name"] = (
+    final_data["sic2"].map(industry_names)
+)
+
+print("\nSECTION 6: FINAL DATA")
+print("Observations:", len(final_data))
+print("Industries:", final_data["sic2"].nunique())
+print("Companies:", final_data["gvkey"].nunique())
+
+
+# ============================================================
+# SECTION 7: CALCULATE INDUSTRY COVERAGE
+# Purpose: Evaluate FY2025 data availability.
+# ============================================================
+
+coverage = (
+    final_data[
+        final_data["fyear"] == END_YEAR
+    ]
+    .groupby("sic2")
+    .agg(
+        n_firms=("gvkey", "nunique"),
+        valid_roa=("roa", "count"),
+        valid_roe=("roe", "count"),
+        valid_margin=("profit_margin", "count"),
+        valid_current_ratio=("current_ratio", "count"),
+        valid_debt_to_equity=("debt_to_equity", "count"),
+        valid_asset_turnover=("asset_turnover", "count"),
+        valid_interest_coverage=("interest_coverage", "count")
+    )
+    .reset_index()
+)
+
+coverage["industry_name"] = (
+    coverage["sic2"].map(industry_names)
+)
+
+coverage["roa_coverage"] = (
+    coverage["valid_roa"] /
+    coverage["n_firms"]
+)
+
+coverage = coverage[
+    ["sic2", "industry_name"] +
+    [c for c in coverage.columns
+     if c not in ["sic2", "industry_name"]]
+]
+
+print("\nSECTION 7: FY2025 INDUSTRY COVERAGE")
+print(coverage.to_string(index=False))
+
+
+# ============================================================
+# SECTION 8: CALCULATE INDUSTRY-YEAR BENCHMARKS
+# Purpose:
+# Calculate median and valid count for every ratio
+# in each industry and fiscal year.
+# ============================================================
+
+benchmarks = (
+    final_data
+    .groupby(["sic2", "fyear"])[ratios]
+    .agg(["median", "count"])
+)
+
+benchmarks.columns = [
+    f"{ratio}_{stat}"
+    for ratio, stat in benchmarks.columns
+]
+
+benchmarks = benchmarks.reset_index()
+
+benchmarks["industry_name"] = (
+    benchmarks["sic2"].map(industry_names)
+)
+
+# Hide benchmarks based on fewer than 20 observations
+for ratio in ratios:
+    count_col = f"{ratio}_count"
+    median_col = f"{ratio}_median"
+
+    benchmarks.loc[
+        benchmarks[count_col] < MIN_OBSERVATIONS,
+        median_col
+    ] = np.nan
+
+benchmarks = benchmarks[
+    ["sic2", "industry_name", "fyear"] +
+    [c for c in benchmarks.columns
+     if c not in ["sic2", "industry_name", "fyear"]]
+]
+
+benchmarks = benchmarks.sort_values(
+    ["sic2", "fyear"]
+)
+
+print("\nSECTION 8: BENCHMARKS CALCULATED")
+print("Industry-year observations:", len(benchmarks))
+
+
+# ============================================================
+# SECTION 9: CREATE TICKER-TO-INDUSTRY MAPPING
+# Purpose:
+# Identify the latest industry classification for
+# each company using its ticker symbol.
+# ============================================================
+
+mapping = (
+    df.sort_values(
+        ["gvkey", "fyear", "datadate"]
+    )
+    .drop_duplicates(
+        "gvkey", keep="last"
+    )
+    [["gvkey", "tic", "conm", "sic", "sic2"]]
+    .dropna(subset=["tic"])
+    .copy()
+)
+
+mapping["tic"] = (
+    mapping["tic"]
+    .astype(str)
+    .str.upper()
+    .str.strip()
+)
+
+# Exclude ambiguous ticker mappings
+mapping["ticker_matches"] = (
+    mapping.groupby("tic")["gvkey"]
+    .transform("nunique")
+)
+
+mapping = mapping[
+    (mapping["ticker_matches"] == 1) &
+    mapping["sic2"].isin(selected_industries)
+].copy()
+
+mapping = mapping.drop(
+    columns="ticker_matches"
+)
+
+mapping["industry_name"] = (
+    mapping["sic2"].map(industry_names)
+)
+
+mapping = mapping[
+    ["gvkey", "tic", "conm",
+     "sic", "sic2", "industry_name"]
+]
+
+print("\nSECTION 9: TICKER MAPPING CREATED")
+print("Mapped companies:", len(mapping))
+
+
+# ============================================================
+# SECTION 10: VERIFY IMPORTANT TICKERS
+# Purpose: Check automatic industry classification.
+# ============================================================
+
+test_tickers = [
+    "AAPL", "MSFT", "GOOGL", "AMZN",
+    "NVDA", "TSLA", "JNJ", "PFE",
+    "KO", "XOM", "CVX", "WMT"
+]
+
+test_mapping = mapping[
+    mapping["tic"].isin(test_tickers)
+]
+
+print("\nSECTION 10: TICKER TEST")
+print(
+    test_mapping[
+        ["tic", "conm", "sic2", "industry_name"]
+    ].sort_values("tic").to_string(index=False)
+)
+
+unmatched = sorted(
+    set(test_tickers) -
+    set(test_mapping["tic"])
+)
+
+print("Unmatched tickers:", unmatched)
+
+
+# ============================================================
+# SECTION 11: EXPORT FINAL CSV FILES
+# Purpose: Save results for Streamlit integration.
+# ============================================================
+
+benchmarks.to_csv(
+    OUTPUT / "industry_benchmarks_final.csv",
+    index=False
+)
+
+mapping.to_csv(
+    OUTPUT / "ticker_industry_mapping_final.csv",
+    index=False
+)
+
+coverage.to_csv(
+    OUTPUT / "industry_coverage_final.csv",
+    index=False
+)
+
+print("\nSECTION 11: EXPORT COMPLETED")
+print("Files saved in:", OUTPUT.resolve())
+
+print("1. industry_benchmarks_final.csv")
+print("2. ticker_industry_mapping_final.csv")
+print("3. industry_coverage_final.csv")
