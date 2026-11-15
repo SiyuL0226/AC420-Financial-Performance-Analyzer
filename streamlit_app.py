@@ -20,7 +20,12 @@ from historical_analysis import (
 )
 
 from dupont_analysis import calculate_dupont
-from industry_benchmark import calculate_industry_medians
+from industry_benchmark import (
+    identify_industry,
+    get_industry_benchmark,
+    compare_with_industry,
+    load_benchmarks,
+)
 
 
 # ==========================================
@@ -84,9 +89,6 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 # INDUSTRY CLASSIFICATIONS
 # ==========================================
 
-ASSIGNED_SIC = {
-    "MSFT": "7372 — Services: Prepackaged Software",
-}
 
 FALLBACK_WEBSITES = {
     "MSFT": "https://www.microsoft.com",
@@ -209,9 +211,10 @@ def load_company(ticker):
             info.get("industry") or "Not available"
         ),
 
-        "assigned_sic": ASSIGNED_SIC.get(
-            ticker, "Not assigned yet"
-        ),
+        "assigned_sic": (
+    f"{industry['sic2']} — {industry['industry_name']}"
+    if (industry := identify_industry(ticker)) is not None
+    else "Not covered by selected industries"),
 
         "fiscal_year_end": (
             pd.Timestamp(latest_year).strftime("%B %Y")
@@ -688,6 +691,7 @@ def financial_analysis():
 # PAGE 3 — INDUSTRY COMPARISON
 # ==========================================
 
+
 def industry_comparison():
 
     report = st.session_state.report
@@ -699,138 +703,80 @@ def industry_comparison():
         f"{report['assigned_sic']}"
     )
 
-    sic = report["assigned_sic"].split(" ")[0]
-
-    if len(sic) != 4 or not sic.isdigit():
-
-        st.warning(
-            "This ticker needs a verified four-digit "
-            "SIC code in ASSIGNED_SIC."
-        )
-
+    # Identify SIC2 automatically
+    try:
+        industry = identify_industry(report["ticker"])
+    except (OSError, ValueError, KeyError) as exc:
+        st.warning(f"Industry classification unavailable: {exc}")
         return
 
-    # Load Compustat data
+    if industry is None:
+        st.warning(
+            "This ticker is not covered by the selected industries."
+        )
+        return
+
+    sic = industry["sic2"]
+
+    # Load precomputed Compustat industry medians
     st.subheader("Compustat Industry Medians")
 
-    uploaded = st.file_uploader(
-        "Upload Compustat Fundamentals Annual CSV",
-        type="csv"
-    )
-
-    if uploaded is not None:
-
-        try:
-            st.session_state.compustat_data = (
-                pd.read_csv(uploaded)
-            )
-
-        except (
-            ValueError,
-            OSError,
-            pd.errors.ParserError
-        ) as exc:
-
-            st.error(
-                f"Unable to read CSV: {exc}"
-            )
-
-            return
-
-    compustat = st.session_state.get(
-        "compustat_data"
-    )
-
-    if compustat is None and CSV_PATH.exists():
-
-        try:
-            compustat = pd.read_csv(CSV_PATH)
-
-        except (
-            ValueError,
-            OSError,
-            pd.errors.ParserError
-        ) as exc:
-
-            st.error(
-                f"Unable to read local Compustat CSV: {exc}"
-            )
-
-            return
-
-    if compustat is None or compustat.empty:
-
-        st.info(
-            "No real Compustat data loaded yet. "
-            "Upload your export or place it in "
-            "data/compustat_annual.csv."
-        )
-
+    try:
+        benchmarks = load_benchmarks()
+    except (OSError, ValueError, KeyError) as exc:
+        st.error(f"Unable to read benchmark data: {exc}")
         return
 
-    # Choose fiscal year
     income = report["income_statement"]
     balance = report["balance_sheet"]
 
+    benchmark_years = set(
+        benchmarks.loc[
+            benchmarks["sic2"] == sic, "fyear"
+        ].dropna().astype(int)
+    )
+
+    income_years = {
+        pd.Timestamp(col).year for col in income.columns
+    }
+    balance_years = {
+        pd.Timestamp(col).year for col in balance.columns
+    }
+
     available_years = sorted(
-        {
-            pd.Timestamp(col).year
-            for col in income.columns
-        },
+        benchmark_years & income_years & balance_years,
         reverse=True
     )
 
+    if not available_years:
+        st.info(
+            "No matching fiscal years are available for "
+            "both company data and industry benchmarks."
+        )
+        return
+
+    # Choose fiscal year
     fyear = st.selectbox(
         "Fiscal year",
         available_years
     )
 
-    peers = compustat.copy()
-
-    peers.columns = (
-        peers.columns.astype(str)
-        .str.strip()
-        .str.lower()
-    )
-
-    if "tic" in peers.columns:
-
-        peers = peers.loc[
-            peers["tic"]
-            .astype("string")
-            .str.strip()
-            .str.upper()
-            != report["ticker"]
-        ].copy()
-
-    else:
-        st.warning(
-            "CSV has no 'tic' column; the target "
-            "company cannot be excluded."
-        )
-
-    # Calculate industry medians
+    # Retrieve industry medians
     try:
-
-        medians = calculate_industry_medians(
-            peers,
-            sic_code=sic,
-            fiscal_year=fyear,
-            min_peers=3
+        benchmark = get_industry_benchmark(
+            report["ticker"], fyear
         )
-
-    except (
-        ValueError,
-        TypeError,
-        KeyError
-    ) as exc:
-
-        st.warning(
-            f"Industry medians unavailable: {exc}"
-        )
-
+    except (OSError, ValueError, KeyError) as exc:
+        st.warning(f"Industry medians unavailable: {exc}")
         return
 
+    if benchmark is None:
+        st.warning(
+            "Industry medians are unavailable for this year."
+        )
+        return
+
+    # Calculate company ratios for the same fiscal year
     company_ratios = ratios_for_year(
         income,
         balance,
@@ -840,25 +786,22 @@ def industry_comparison():
     # Build comparison table
     rows = []
 
-    for record in medians.to_dict("records"):
+    for ratio in ALL_RATIOS:
 
-        ratio = record["Ratio"]
+        if ratio not in benchmark["ratios"]:
+            continue
 
-        company_value, is_percent = (
-            company_ratios[ratio]
-        )
+        company_value, is_percent = company_ratios[ratio]
 
-        median_value = record["Industry Median"]
+        median_value = benchmark["ratios"][ratio]["median"]
+        peer_count = benchmark["ratios"][ratio]["count"]
 
         if (
             is_valid(company_value)
             and is_valid(median_value)
         ):
 
-            delta = (
-                float(company_value)
-                - float(median_value)
-            )
+            delta = float(company_value) - float(median_value)
 
             position = (
                 "Above median"
@@ -882,25 +825,20 @@ def industry_comparison():
 
         rows.append({
             "Ratio": ratio,
-
             "Company": format_ratio(
-                company_value,
-                is_percent
+                company_value, is_percent
             ),
-
             "Industry Median": format_ratio(
-                median_value,
-                is_percent
+                median_value, is_percent
             ),
-
             "Difference": difference,
             "Position": position,
-            "Peer Count": int(record["Peer Count"]),
+            "Peer Count": peer_count,
         })
 
     st.caption(
-        f"SIC {sic} · FY{fyear} · "
-        "Minimum 3 valid peers per ratio. "
+        f"SIC2 {sic} · FY{fyear} · "
+        "Minimum 20 valid peers per ratio. "
         "Above median does not always mean "
         "better performance."
     )
@@ -919,13 +857,9 @@ def industry_comparison():
         ALL_RATIOS
     )
 
-    company_value, is_percent = (
-        company_ratios[selected]
-    )
+    company_value, is_percent = company_ratios[selected]
 
-    industry_value = medians.set_index(
-        "Ratio"
-    ).at[selected, "Industry Median"]
+    industry_value = benchmark["ratios"][selected]["median"]
 
     if (
         not is_valid(company_value)
